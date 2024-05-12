@@ -1,3 +1,4 @@
+import area from '@turf/area';
 import bbox from '@turf/bbox';
 import booleanPointInPolygon from '@turf/boolean-point-in-polygon';
 import * as turfModel from '@turf/helpers';
@@ -37,7 +38,7 @@ class StreetViewService {
             } while(this.alreadyVisited.includes(randomPos.position.toString()));
 
             this.alreadyVisited.push(randomPos.position.toString());
-            
+
             radius = randomPos.radius;
             position = randomPos.position;
             randomFeatureProperties = randomPos.properties;
@@ -105,7 +106,7 @@ class StreetViewService {
             }catch(err){
                 return this.getStreetView(round);
             }
-            
+
             return {
                 panorama: data,
                 roundInfo: randomFeatureProperties || null,
@@ -114,19 +115,27 @@ class StreetViewService {
             };
         }
     }
-    
+
 
     getRandomLatLng() {
         if (this.placeGeoJson != null) {
             let position,
                 radius,
                 properties = null;
-            if (this.placeGeoJson.type === 'FeatureCollection') {  
-                let randInt = Math.floor(
-                    Math.random() * this.placeGeoJson.features.length
-                );
+            if (this.placeGeoJson.type === 'FeatureCollection') {
+                // select a feature with weight based on the area of the polygon
+                // (we give points a token 1km^2 weight, mixing points and polys are not recommended)
+                const featureWeights = this.placeGeoJson.features.map(
+                    feature => feature.geometry.type === 'Point' ? 1000000 : area(feature));
 
-                const feature = this.placeGeoJson.features[randInt];
+                const featureWeightsCumul = featureWeights.reduce((acc, item, i) => {
+                    acc.push(item + (acc[i - 1] || 0));
+                    return acc;
+                }, []);
+                const random = Math.random() * featureWeightsCumul[featureWeightsCumul.length - 1];
+                const feature = this.placeGeoJson.features[featureWeightsCumul.findIndex((weight) => weight > random)];
+
+                // select a point in the selected feature (or return it if it is a single point)
                 properties = feature.properties;
                 if (feature.geometry.type === 'Point') {
                     position = feature.geometry.coordinates;
@@ -152,7 +161,7 @@ class StreetViewService {
         const lng = Math.random() * 360 - 180;
 
         return {
-            radius: 100000,
+            radius: 1000,
             position: new google.maps.LatLng(lat, lng),
             properties: null,
         };
@@ -160,7 +169,7 @@ class StreetViewService {
 
     _checkStreetView(data) {
         return !(
-            this.settingsPanorama.optimiseStreetView && 
+            this.settingsPanorama.optimiseStreetView &&
                 (
                     !/^\xA9 (?:\d+ )?Google$/.test(data.copyright) ||
                     !data.imageDate ||
